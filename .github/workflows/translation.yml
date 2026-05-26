@@ -1,0 +1,104 @@
+name: Auto Translate
+
+concurrency:
+  group: auto-translate
+  cancel-in-progress: false
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v6
+        with:
+          ref: source
+          fetch-depth: 0
+
+      - name: Fetch source branch
+        run: git fetch origin main
+      
+      - name: Pick a random file
+        id: pick
+        run: |
+          target="$(find . -path './pr_created' -prune -o -type f -name '*.mdx' -print | shuf -n 1)"
+          if [ -z "$target" ]; then
+            echo "No MDX files found"
+            exit 1
+          fi
+          echo "target=$target" >> $GITHUB_OUTPUT
+
+      - name: Read source MDX
+        id: read
+        run: |
+          delim=$(uuidgen)
+          {
+            echo "body<<$delim"
+            cat ${{ steps.pick.outputs.target }}
+            echo $delim
+          } >> $GITHUB_OUTPUT
+          
+      - name: Translate with Claude
+        id: translate
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            以下のmdxについて、コードブロック・タグ・フロントマターのキー以外を日本語に翻訳してください。
+            
+            ${{ steps.read.outputs.body }}
+          claude_args: |
+            --model claude-sonnet-4-6 \
+            --output-format json \
+            --json-schema '{
+              "type": "object",
+              "properties": {
+                "translated": {"type": "string"}
+              },
+              "required": ["translated"]
+            }'
+
+      - name: Commit translated file
+        id: commit
+        env:
+          TRANSLATED: ${{ steps.translate.outputs.structured_output }}
+        run: |
+          path="contents/docs/${{ steps.pick.outputs.target }}"
+          branch="translate-$(uuidgen | cut -c1-8)"
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout -b $branch origin/main
+          mkdir -p "$(dirname $path)"
+          echo "$TRANSLATED" | jq -r ".translated" > $path
+          git add $path
+          git commit -m "Translate ${{ steps.pick.outputs.target }}"
+          git push -u origin $branch
+          echo "branch=$branch" >> $GITHUB_OUTPUT
+
+      - name: Create PR
+        env: 
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head ${{ steps.commit.outputs.branch }} \
+            --title "Translate ${{ steps.pick.outputs.target }}" \
+            --body "Auto-generated translation PR"
+
+      - name: Move the file
+        run: |
+          git checkout source
+          dest="pr_created/${{ steps.pick.outputs.target }}"
+          mkdir -p "$(dirname "$dest")"
+          mv "${{ steps.pick.outputs.target }}" "$dest"
+          git add "$dest" "${{ steps.pick.outputs.target }}"
+          git commit -m "Move PR-created file to pr_created"
+          git push -u origin source

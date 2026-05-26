@@ -6,7 +6,7 @@ concurrency:
 
 on:
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: "0 */12 * * *"
   workflow_dispatch:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    
+
     steps:
       - name: Checkout source branch
         uses: actions/checkout@v6
@@ -25,7 +25,7 @@ jobs:
 
       - name: Fetch source branch
         run: git fetch origin main
-      
+
       - name: Pick a random file
         id: pick
         run: |
@@ -45,7 +45,7 @@ jobs:
             cat ${{ steps.pick.outputs.target }}
             echo $delim
           } >> $GITHUB_OUTPUT
-          
+
       - name: Translate with Claude
         id: translate
         uses: anthropics/claude-code-action@v1
@@ -53,7 +53,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             以下のmdxについて、コードブロック・タグ・フロントマターのキー以外を日本語に翻訳してください。
-            
+
             ${{ steps.read.outputs.body }}
           claude_args: |
             --model claude-sonnet-4-6 \
@@ -84,7 +84,7 @@ jobs:
           echo "branch=$branch" >> $GITHUB_OUTPUT
 
       - name: Create PR
-        env: 
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh pr create \

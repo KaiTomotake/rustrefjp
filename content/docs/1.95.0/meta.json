@@ -1,5 +1,0 @@
-{
-    "title": "Rust 1.95.0",
-    "root": true,
-    "pages": ["---Introduction---", "index", "modlist", "---References---", "..."]
-}

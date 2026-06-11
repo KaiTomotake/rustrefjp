@@ -46,7 +46,7 @@ jobs:
             入力文に含まれる書式（改行や段落）は、可能な限り維持してください。
           prompt-file: ${{ steps.pick.outputs.target }}
           model: deepseek/deepseek-v3-0324
-          
+
       - name: Commit translated file
         id: commit
         run: |

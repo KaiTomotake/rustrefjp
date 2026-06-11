@@ -1,0 +1,83 @@
+name: Auto Translate
+
+concurrency:
+  group: auto-translate
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    permissions:
+      models: read
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v6
+        with:
+          ref: source
+          fetch-depth: 0
+
+      - name: Fetch main branch
+        run: git fetch origin main
+
+      - name: Pick a random file
+        id: pick
+        run: |
+          target="$(find . -path './pr_created' -prune -o -type f -name '*.mdx' -print | shuf -n 1)"
+          if [ -z "$target" ]; then
+            echo 'No MDX files found'
+            exit 1
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+
+      - name: Translate with Deepseek
+        id: inference
+        uses: actions/ai-inference@v1
+        with:
+          system-prompt: |
+            あなたの役割は翻訳者です。
+            ユーザーが入力した文章を自然で正確な日本語に翻訳してください。
+            翻訳結果以外の説明、注釈、前置き、後書き、引用符は出力しないでください。
+            入力文に含まれる書式（改行や段落）は、可能な限り維持してください。
+          prompt-file: ${{ steps.pick.outputs.target }}
+          model: deepseek/deepseek-v3-0324
+          
+      - name: Commit translated file
+        id: commit
+        run: |
+          path="contents/docs/${{ steps.pick.outputs.target }}"
+          branch="translate-$(uuidgen | cut -c1-8)"
+          git config user.name 'github-actions'
+          git config user.email 'github-actions@users.noreply.github.com'
+          git checkout -b $branch origin/main
+          mkdir -p "$(dirname "$path")"
+          cp "${{ steps.inference.outputs.response-file }}" "$path"
+          git add "$path"
+          git commit -m "Translate ${{ steps.pick.outputs.target }}"
+          git push -u origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head "${{ steps.commit.outputs.branch }}" \
+            --title "Translate ${{ steps.pick.outputs.target }}" \
+            --body 'Auto-generated translation PR'
+
+      - name: Move the file
+        run: |
+          git checkout source
+          dest="pr_created/${{ steps.pick.outputs.target }}"
+          mkdir -p "$(dirname "$dest")"
+          git mv "${{ steps.pick.outputs.target }}" "$dest"
+          git add "$dest"
+          git commit -m 'Move PR-created file to pr_created'
+          git push -u origin source
